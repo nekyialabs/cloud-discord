@@ -7,8 +7,9 @@
 
 import type { AiBinding } from './pulse';
 import type { EventsEnv } from './events';
+import type { HeartbeatEnv } from './heartbeats';
 
-export interface AgentEnv extends EventsEnv {
+export interface AgentEnv extends EventsEnv, HeartbeatEnv {
   AGENTS?: string;
   DISCORD_BOT_TOKEN?: string;
   MCP_SECRET_PATH?: string;
