@@ -346,7 +346,7 @@ Start with `after=0`, then pass back `next`. The secret in the URL picks the age
 How it behaves:
 - **No backfill.** A channel's first appearance starts from that moment, so switching this on never replays history.
 - **Only what the bot can read.** Each agent's channels are read with its own token. A channel it can't read produces nothing.
-- **Loop guard.** An agent's own messages never queue. A bot can wake a given agent in a given channel at most 3 times an hour, and @everyone from a bot never wakes anyone. People are never limited.
+- **Loop guard.** An agent's own messages never queue. A bot can wake a given agent in a given channel at most 3 times an hour, and @everyone from a bot never wakes anyone. People are never limited. What the cap holds back is not dropped in silence: the agent gets a `held_back` event, at most once an hour per channel ("2 bot messages in #forge held back by the rate limit; read the channel."), which never counts toward the cap.
 - **Readable.** Mentions of users, roles and channels are turned into names in `content`; `content_raw` keeps the original.
 - **Kept for 7 days.** One message makes at most one event per agent, with mention ranked above reply, and reply above @everyone.
 

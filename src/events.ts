@@ -19,6 +19,10 @@ const CONTENT_LIMIT = 1500;
 const RETENTION_MS = 7 * 24 * 3_600_000;
 // A bot can wake the same agent in the same channel at most this many times an hour
 const BOT_WAKES_PER_HOUR = 3;
+// What the cap holds back is not dropped in silence: the agent is told how many, at most once an
+// hour per channel, so it knows to go and read (a 'held_back' event, from no bot, so it never
+// counts toward the cap itself)
+const HELD_NOTICE_EVERY_MS = 3_600_000;
 const TALK_TYPES = new Set([0, 19]);
 
 const SCHEMA = [
@@ -46,6 +50,14 @@ const SCHEMA = [
     tenant TEXT NOT NULL,
     channel_id TEXT NOT NULL,
     last_id TEXT NOT NULL,
+    PRIMARY KEY (tenant, channel_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS held_back (
+    tenant TEXT NOT NULL,
+    channel_id TEXT NOT NULL,
+    channel_name TEXT,
+    thread_parent TEXT,
+    n INTEGER NOT NULL,
     PRIMARY KEY (tenant, channel_id)
   )`,
 ];
@@ -158,6 +170,8 @@ async function pollAgent(
   const writes: D1PreparedStatement[] = [];
   // Bot wakes queued this tick but not yet written, so the hourly cap holds within one batch
   const botWakesThisTick = new Map<string, number>();
+  // Bot messages the cap held back this tick, by channel
+  const heldThisTick = new Map<string, { name: string | null; parent: string | null; n: number }>();
   let started = 0, read = 0, queued = 0;
   for (const c of watched) {
     const cursor = cursors.get(c.id);
@@ -186,7 +200,10 @@ async function pollAgent(
           .prepare('SELECT COUNT(*) AS n FROM events WHERE tenant = ? AND channel_id = ? AND author_bot = 1 AND created_at > ?')
           .bind(agent.name, c.id, now - 3_600_000).first<{ n: number }>();
         const pending = botWakesThisTick.get(c.id) ?? 0;
-        if ((recent?.n ?? 0) + pending >= BOT_WAKES_PER_HOUR) continue;
+        if ((recent?.n ?? 0) + pending >= BOT_WAKES_PER_HOUR) {
+          heldThisTick.set(c.id, { name: c.name ?? null, parent: parentName, n: (heldThisTick.get(c.id)?.n ?? 0) + 1 });
+          continue;
+        }
         botWakesThisTick.set(c.id, pending + 1);
       }
 
@@ -207,8 +224,49 @@ async function pollAgent(
     }
     writes.push(setCursor(c.id, messages[messages.length - 1].id));
   }
+  for (const [channelId, h] of heldThisTick) {
+    writes.push(db.prepare(
+      `INSERT INTO held_back (tenant, channel_id, channel_name, thread_parent, n) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (tenant, channel_id) DO UPDATE SET n = n + excluded.n, channel_name = excluded.channel_name,
+         thread_parent = excluded.thread_parent`,
+    ).bind(agent.name, channelId, h.name, h.parent, h.n));
+  }
   if (writes.length) await db.batch(writes);
-  return `${watched.length} channel(s) watched, ${started} started, ${read} read, ${queued} queued`;
+  const noticed = await noticeHeldBack(db, guildId, agent.name, now);
+  const held = [...heldThisTick.values()].reduce((sum, h) => sum + h.n, 0);
+  return `${watched.length} channel(s) watched, ${started} started, ${read} read, ${queued} queued` +
+    (held || noticed ? `, ${held} held back, ${noticed} told` : '');
+}
+
+/** What the agent reads when the cap held bot messages back in a channel. */
+export function heldBackText(n: number, channelName: string | null): string {
+  return `${n} bot message${n === 1 ? '' : 's'} in #${channelName ?? 'a channel'} held back by the rate limit; read the channel.`;
+}
+
+// Tell the agent what the cap held back, in each channel not told in the last hour, and start
+// that channel's count again. Held since are told an hour later, so the notices can't ping-pong either.
+async function noticeHeldBack(db: D1Database, guildId: string, tenant: string, now: number): Promise<number> {
+  const rows = await db.prepare(
+    `SELECT h.channel_id, h.channel_name, h.thread_parent, h.n FROM held_back h
+     WHERE h.tenant = ? AND h.n > 0 AND NOT EXISTS (
+       SELECT 1 FROM events e WHERE e.tenant = h.tenant AND e.channel_id = h.channel_id
+         AND e.kind = 'held_back' AND e.created_at > ?)`,
+  ).bind(tenant, now - HELD_NOTICE_EVERY_MS).all();
+  const told = rows.results as any[];
+  if (told.length === 0) return 0;
+  await db.batch(told.flatMap(r => {
+    const text = heldBackText(r.n, r.channel_name);
+    return [
+      db.prepare(
+        `INSERT OR IGNORE INTO events (tenant, kind, guild_id, channel_id, channel_name, thread_parent, message_id,
+          author_id, author_name, author_bot, content, content_raw, truncated, ts, created_at)
+         VALUES (?, 'held_back', ?, ?, ?, ?, ?, 'door', 'the door', 0, ?, ?, 0, ?, ?)`,
+      ).bind(tenant, guildId, r.channel_id, r.channel_name, r.thread_parent, `held-${r.channel_id}-${now}`,
+        text, text, new Date(now).toISOString(), now),
+      db.prepare('UPDATE held_back SET n = n - ? WHERE tenant = ? AND channel_id = ?').bind(r.n, tenant, r.channel_id),
+    ];
+  }));
+  return told.length;
 }
 
 // GET /mcp/<secret>/events?after=<seq>&limit=<n>: this agent's queue, oldest first
