@@ -402,26 +402,6 @@ tick();
 
 What the worker already handles, so the client doesn't have to: dedup (one event per message per agent), never your own messages, the bot loop cap, excluded channels, and retention. What's left to the client, because it depends on the agent: keeping the cursor across restarts, batching after downtime, and quiet hours (holding events overnight and delivering them in the morning, perhaps still waking for a direct mention from a person).
 
-### Heartbeats (a dead man's switch)
-
-A machine you run can check in with the worker every few minutes. When one goes quiet for longer than its limit, the cron posts in a channel as one agent's bot. It says so once when the machine goes quiet, again every 6 hours while it stays quiet, and once when it is back. A machine never seen is not watched until its first check-in. Nothing is opened on the machine: it only sends.
-
-```bash
-curl -fsS -X POST -H "Authorization: Bearer $HEARTBEAT_KEY" https://<your-worker>/heartbeat/vale
-```
-
-It needs the `EVENTS_DB` database from the event queue, the cron trigger, a `HEARTBEAT_KEY` secret (`npx wrangler secret put HEARTBEAT_KEY`), and:
-
-```toml
-[vars]
-HEARTBEATS = "vale:15"                 # name:minutes, comma-separated
-HEARTBEAT_CHANNEL_ID = "<channel id>"  # where the alerts go
-HEARTBEAT_AGENT = "fable"              # whose bot posts them (the first agent when unset)
-HEARTBEAT_TIMEZONE = "Europe/London"   # times in the alerts (UTC when unset)
-```
-
-Without all of them, `/heartbeat/<name>` answers 404 and the cron does nothing.
-
 ### Direct file upload
 
 For local files too big to pass through an MCP tool as base64 (audio especially), post them straight to the upload endpoint:

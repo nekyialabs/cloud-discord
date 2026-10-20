@@ -7,7 +7,6 @@ import Anthropic from '@anthropic-ai/sdk';
 import nacl from 'tweetnacl';
 import { version } from '../package.json';
 import { pollEvents, serveEvents } from './events';
-import { checkHeartbeats, receiveHeartbeat } from './heartbeats';
 import { Agent, AgentEnv, DEFAULT_AGENT_NAME, findAgentByName, loadAgents, matchMcpPath } from './agents';
 
 type Env = AgentEnv;
@@ -170,12 +169,9 @@ async function updateInteractionResponse(appId: string, token: string, botToken:
 }
 
 export default {
-  // Cron trigger: fill each agent's event queue (does nothing unless EVENTS_DB and EVENTS_GUILD_ID are set),
-  // and say which machines have stopped checking in (does nothing unless HEARTBEATS is set up)
+  // Cron trigger: fill each agent's event queue (does nothing unless EVENTS_DB and EVENTS_GUILD_ID are set)
   async scheduled(_controller: unknown, env: Env, ctx: ExecutionContext): Promise<void> {
-    const agents = loadAgents(env).filter(a => a.secretPath);
-    ctx.waitUntil(pollEvents(env, agents));
-    ctx.waitUntil(checkHeartbeats(env, agents).catch(error => console.error(`[heartbeats] ${error instanceof Error ? error.message : String(error)}`)));
+    ctx.waitUntil(pollEvents(env, loadAgents(env).filter(a => a.secretPath)));
   },
 
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -215,12 +211,6 @@ export default {
     // Health check (public)
     if (path === '/health') {
       return Response.json({ status: 'ok', tools: DISCORD_TOOLS.length });
-    }
-
-    // A machine checking in (heartbeats.ts): keyed, and 404 unless heartbeats are set up
-    const heartbeatMatch = path.match(/^\/heartbeat\/([a-z0-9_-]+)$/i);
-    if (heartbeatMatch && request.method === 'POST') {
-      return receiveHeartbeat(env, loadAgents(env).filter(a => a.secretPath), request, heartbeatMatch[1]);
     }
 
     // Secret path check — all MCP endpoints require /mcp/<SECRET>, and the secret picks the agent.
