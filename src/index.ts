@@ -289,7 +289,7 @@ export default {
     // CORS headers for MCP
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+      'Access-Control-Allow-Methods': 'POST, DELETE, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type',
     };
 
@@ -297,11 +297,12 @@ export default {
       return new Response(null, { status: 204, headers: corsHeaders });
     }
 
-    // GET — MCP Streamable HTTP requires responding to GET
+    // GET: this server offers no SSE stream, so the MCP Streamable HTTP spec says 405. A 200 makes
+    // clients treat the stream as dropped and reconnect about once a second (issue #10).
     if (request.method === 'GET') {
-      return new Response('MCP endpoint active', {
-        status: 200,
-        headers: { ...corsHeaders, 'Content-Type': 'text/plain' },
+      return new Response('Method not allowed', {
+        status: 405,
+        headers: { ...corsHeaders, Allow: 'POST, DELETE, OPTIONS' },
       });
     }
 
