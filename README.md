@@ -1,6 +1,6 @@
 # Cloud Discord
 
-A Discord MCP (Model Context Protocol) server that runs on Cloudflare Workers. It gives an AI agent a Discord bot account to work through: 66 tools for messaging, catching up, a server pulse, search, moderation, forums, roles, files, voice messages and more.
+A Discord MCP (Model Context Protocol) server that runs on Cloudflare Workers. It gives an AI agent a Discord bot account to work through: 82 tools for messaging, rich messages, catching up, a server pulse, search, moderation, forums, roles, scheduled events, emoji, stickers, files, voice messages and more.
 
 You deploy it once to your own Cloudflare account and connect any MCP client to its URL (Claude Code, Claude Desktop, claude.ai, Cursor, and others). There's no server to keep running, and no database unless you turn on the optional [event queue](#event-queue), which lets an agent wake up when someone talks to it on Discord.
 
@@ -85,7 +85,7 @@ Wrangler prints your Worker's address, like `https://cloud-discord.<your-subdoma
 ### 6. Check it works
 
 ```bash
-# Should print {"status":"ok","tools":66}
+# Should print {"status":"ok","tools":82}
 curl https://cloud-discord.<your-subdomain>.workers.dev/health
 
 # Should print a JSON result naming "cloud-discord"
@@ -423,12 +423,12 @@ Discord allows up to 20 MB per file (more on boosted servers).
 
 ## Tool reference
 
-66 tools. Each MCP client also gets the full parameter list for every tool.
+82 tools. Each MCP client also gets the full parameter list for every tool.
 
 | Category | Count |
 |----------|-------|
 | [Catching up & search](#catching-up--search) | 3 |
-| [Messaging](#messaging) | 10 |
+| [Messaging](#messaging) | 12 |
 | [Reactions & pins](#reactions--pins) | 6 |
 | [Channels](#channels) | 7 |
 | [Threads](#threads) | 3 |
@@ -438,6 +438,9 @@ Discord allows up to 20 MB per file (more on boosted servers).
 | [Server](#server) | 2 |
 | [Invites & polls](#invites--polls) | 6 |
 | [Files, images & voice](#files-images--voice) | 5 |
+| [Profile](#profile) | 3 |
+| [Events](#events) | 5 |
+| [Emoji & stickers](#emoji--stickers) | 6 |
 
 ### Catching up & search
 | Tool | Description |
@@ -457,6 +460,8 @@ Discord allows up to 20 MB per file (more on boosted servers).
 | `discord_delete_message` | Delete a message |
 | `discord_bulk_delete_messages` | Delete 2-100 messages at once (each under 14 days old) |
 | `discord_send_embed` | Send a rich embed with title, fields, images, colors |
+| `discord_send_rich_message` | Send a Components V2 message built from text, separators, image galleries, sections and link buttons |
+| `discord_edit_rich_message` | Replace the contents of such a message |
 | `discord_send_typing` | Show "typing…" before a slow reply |
 | `discord_forward_message` | Forward a message to another channel |
 
@@ -548,6 +553,38 @@ Discord allows up to 20 MB per file (more on boosted servers).
 | `discord_fetch_image` | Fetch an image attachment so the model can see it |
 | `discord_fetch_dm_image` | Same, from a DM |
 | `discord_send_voice_note` | Speak text and send it as a native voice message (needs ElevenLabs) |
+
+### Profile
+These only ever change the bot itself.
+
+| Tool | Description |
+|------|-------------|
+| `discord_get_my_profile` | The bot's username, avatar and banner, and with `guild_id` its nickname and server profile |
+| `discord_set_my_profile` | Change the bot's nickname, server avatar, server banner or bio in one server |
+| `discord_set_my_global_profile` | Change the bot's username, avatar or banner in every server (username changes are heavily rate-limited) |
+
+### Events
+| Tool | Description |
+|------|-------------|
+| `discord_list_events` | List scheduled events |
+| `discord_create_event` | Create an event in a voice or stage channel, or an external one with a location |
+| `discord_edit_event` | Edit an event, or start, end or cancel it |
+| `discord_delete_event` | Delete an event |
+| `discord_get_event_users` | See who is interested in an event |
+
+### Emoji & stickers
+Emoji go in a server when you give `guild_id`, and otherwise in the bot's application, where the bot can use them in any server.
+
+| Tool | Description |
+|------|-------------|
+| `discord_list_emojis` | List emoji with the `<:name:id>` form to paste into messages |
+| `discord_create_emoji` | Add an emoji from a URL or base64 (up to 256 KiB) |
+| `discord_delete_emoji` | Delete an emoji |
+| `discord_list_stickers` | List a server's stickers |
+| `discord_create_sticker` | Add a sticker (PNG, APNG, GIF or Lottie, up to 512 KiB) |
+| `discord_delete_sticker` | Delete a sticker |
+
+These tools need extra bot permissions: **Create Events** (and **Manage Events** to change other people's events), **Create Expressions** (and **Manage Expressions** to delete other people's emoji and stickers), and **Change Nickname** for the bot's own nickname. Application emoji need no permission.
 
 ## How it works
 

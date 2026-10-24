@@ -233,16 +233,44 @@ export async function discordFetchMultipart(
   });
 }
 
+// Send plain form fields plus one file as multipart/form-data (no payload_json), e.g. guild stickers
+export async function discordFetchForm(
+  token: string,
+  method: string,
+  path: string,
+  fields: Record<string, string>,
+  file: { field: string; data: Uint8Array; fileName: string; contentType: string },
+): Promise<DiscordResponse> {
+  // Build a fresh body per attempt so a retry never sends a consumed stream
+  return sendWithRetry(method, path, () => {
+    const form = new FormData();
+    for (const [key, value] of Object.entries(fields)) form.append(key, value);
+    form.append(file.field, new Blob([file.data], { type: file.contentType }), file.fileName);
+    return {
+      method,
+      headers: {
+        Authorization: `Bot ${token}`,
+        'User-Agent': 'CloudDiscord/1.0',
+      },
+      body: form,
+    };
+  });
+}
+
+// Encode in chunks: spreading a whole file into String.fromCharCode overflows the stack
+export function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(binary);
+}
+
 // Fetch an image attachment as base64, ready to return as MCP image content
 export async function fetchImageAsBase64(url: string): Promise<{ data: string; mimeType: string }> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to fetch image: ${res.status}`);
   const bytes = new Uint8Array(await res.arrayBuffer());
-  // Encode in chunks: spreading a whole image into String.fromCharCode overflows the stack
-  let binary = '';
-  for (let i = 0; i < bytes.length; i += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  }
   const mimeType = (res.headers.get('content-type') || 'image/png').split(';')[0].trim();
-  return { data: btoa(binary), mimeType };
+  return { data: bytesToBase64(bytes), mimeType };
 }
