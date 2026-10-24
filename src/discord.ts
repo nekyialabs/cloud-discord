@@ -111,6 +111,27 @@ function emojiLabel(emoji: any): string {
   return emoji?.id ? `:${emoji.name}:` : (emoji?.name ?? '?');
 }
 
+// Components V2 messages carry their words in components, not content. Pull the text out so a
+// reader sees it: text displays and section text in full, the rest as short markers.
+export function componentText(components: any[] | undefined): string {
+  const parts: string[] = [];
+  const walk = (list: any[] | undefined) => {
+    for (const c of list ?? []) {
+      switch (c.type) {
+        case 10: if (c.content) parts.push(c.content); break;                                   // text display
+        case 9: walk(c.components); walk(c.accessory ? [c.accessory] : []); break;               // section
+        case 17: case 1: walk(c.components); break;                                              // container, action row
+        case 11: parts.push('[thumbnail]'); break;
+        case 12: parts.push(`[gallery: ${c.items?.length ?? 0} image(s)]`); break;
+        case 13: parts.push(`[file: ${c.file?.url ?? ''}]`); break;
+        case 2: if (c.label) parts.push(c.url ? `[link: ${c.label} ${c.url}]` : `[button: ${c.label}]`); break;
+      }
+    }
+  };
+  walk(components);
+  return parts.join('\n');
+}
+
 // Helper to format a Discord message object into readable text.
 // Written for a model reading it: who (display name and handle), what, and what's attached.
 export function formatMessage(msg: any): string {
@@ -159,7 +180,7 @@ export function formatMessage(msg: any): string {
 
   // Show <@id> mentions as @name, so the reader knows who was addressed
   const named = new Map<string, string>((msg.mentions ?? []).map((u: any) => [u.id, u.global_name || u.username]));
-  const text = (msg.content || '').replace(/<@!?(\d+)>/g, (tag: string, id: string) => named.has(id) ? `@${named.get(id)}` : tag);
+  const text = (msg.content || componentText(msg.components)).replace(/<@!?(\d+)>/g, (tag: string, id: string) => named.has(id) ? `@${named.get(id)}` : tag);
   const content = text || (extras.length ? '' : '[no text content]');
   const tail = extras.map(e => `\n  ${e}`).join('');
   return `[${timestamp}] (ID: ${msg.id}) ${author}${bot}${replyTo}${edited}: ${content}${tail}`;
@@ -233,16 +254,44 @@ export async function discordFetchMultipart(
   });
 }
 
+// Send plain form fields plus one file as multipart/form-data (no payload_json), e.g. guild stickers
+export async function discordFetchForm(
+  token: string,
+  method: string,
+  path: string,
+  fields: Record<string, string>,
+  file: { field: string; data: Uint8Array; fileName: string; contentType: string },
+): Promise<DiscordResponse> {
+  // Build a fresh body per attempt so a retry never sends a consumed stream
+  return sendWithRetry(method, path, () => {
+    const form = new FormData();
+    for (const [key, value] of Object.entries(fields)) form.append(key, value);
+    form.append(file.field, new Blob([file.data], { type: file.contentType }), file.fileName);
+    return {
+      method,
+      headers: {
+        Authorization: `Bot ${token}`,
+        'User-Agent': 'CloudDiscord/1.0',
+      },
+      body: form,
+    };
+  });
+}
+
+// Encode in chunks: spreading a whole file into String.fromCharCode overflows the stack
+export function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(binary);
+}
+
 // Fetch an image attachment as base64, ready to return as MCP image content
 export async function fetchImageAsBase64(url: string): Promise<{ data: string; mimeType: string }> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to fetch image: ${res.status}`);
   const bytes = new Uint8Array(await res.arrayBuffer());
-  // Encode in chunks: spreading a whole image into String.fromCharCode overflows the stack
-  let binary = '';
-  for (let i = 0; i < bytes.length; i += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  }
   const mimeType = (res.headers.get('content-type') || 'image/png').split(';')[0].trim();
-  return { data: btoa(binary), mimeType };
+  return { data: bytesToBase64(bytes), mimeType };
 }

@@ -3,7 +3,7 @@
 // configured guild over REST once a minute, with each agent's own token, so an agent only ever
 // queues messages from channels its bot can read. Off unless EVENTS_DB and EVENTS_GUILD_ID are set.
 
-import { discordFetch } from './discord';
+import { discordFetch, componentText } from './discord';
 import type { Agent } from './agents';
 
 export interface EventsEnv {
@@ -207,7 +207,7 @@ async function pollAgent(
         botWakesThisTick.set(c.id, pending + 1);
       }
 
-      const raw = m.content ?? '';
+      const raw = m.content || componentText(m.components);
       const text = readable(raw, m, roleNames, channelNames);
       const stmt = db.prepare(
         `INSERT OR IGNORE INTO events (tenant, kind, guild_id, channel_id, channel_name, thread_parent, message_id,
