@@ -2,7 +2,7 @@
 // what the house is doing rather than read every message. Counts and connections are computed
 // from the messages; the optional mood line is a reading by a Workers AI model, labelled as one.
 
-import { discordFetch, parseSince, snowflakeFromTime } from './discord';
+import { discordFetch, parseSince, snowflakeFromTime, componentText } from './discord';
 
 // The slice of the Workers AI binding this file uses
 export interface AiBinding {
@@ -151,7 +151,7 @@ export async function serverPulse(token: string, args: Record<string, unknown>, 
       for (const u of [...(m.mentions ?? []), ...(repliedTo ? [repliedTo] : [])]) {
         if (!people.has(u.id)) people.set(u.id, { name: displayName(u), bot: !!u.bot, count: 0, channels: new Set() });
       }
-      const text = m.content || (m.attachments?.length ? `[${m.attachments.length} attachment(s)]` : m.embeds?.length ? '[embed]' : '[no text]');
+      const text = m.content || componentText(m.components) || (m.attachments?.length ? `[${m.attachments.length} attachment(s)]` : m.embeds?.length ? '[embed]' : '[no text]');
       return { id: m.id, at: m.timestamp, channel: ch.label, authorId, author: displayName(m.author), text, targets: [...targets] };
     });
 

@@ -111,6 +111,27 @@ function emojiLabel(emoji: any): string {
   return emoji?.id ? `:${emoji.name}:` : (emoji?.name ?? '?');
 }
 
+// Components V2 messages carry their words in components, not content. Pull the text out so a
+// reader sees it: text displays and section text in full, the rest as short markers.
+export function componentText(components: any[] | undefined): string {
+  const parts: string[] = [];
+  const walk = (list: any[] | undefined) => {
+    for (const c of list ?? []) {
+      switch (c.type) {
+        case 10: if (c.content) parts.push(c.content); break;                                   // text display
+        case 9: walk(c.components); walk(c.accessory ? [c.accessory] : []); break;               // section
+        case 17: case 1: walk(c.components); break;                                              // container, action row
+        case 11: parts.push('[thumbnail]'); break;
+        case 12: parts.push(`[gallery: ${c.items?.length ?? 0} image(s)]`); break;
+        case 13: parts.push(`[file: ${c.file?.url ?? ''}]`); break;
+        case 2: if (c.label) parts.push(c.url ? `[link: ${c.label} ${c.url}]` : `[button: ${c.label}]`); break;
+      }
+    }
+  };
+  walk(components);
+  return parts.join('\n');
+}
+
 // Helper to format a Discord message object into readable text.
 // Written for a model reading it: who (display name and handle), what, and what's attached.
 export function formatMessage(msg: any): string {
@@ -159,7 +180,7 @@ export function formatMessage(msg: any): string {
 
   // Show <@id> mentions as @name, so the reader knows who was addressed
   const named = new Map<string, string>((msg.mentions ?? []).map((u: any) => [u.id, u.global_name || u.username]));
-  const text = (msg.content || '').replace(/<@!?(\d+)>/g, (tag: string, id: string) => named.has(id) ? `@${named.get(id)}` : tag);
+  const text = (msg.content || componentText(msg.components)).replace(/<@!?(\d+)>/g, (tag: string, id: string) => named.has(id) ? `@${named.get(id)}` : tag);
   const content = text || (extras.length ? '' : '[no text content]');
   const tail = extras.map(e => `\n  ${e}`).join('');
   return `[${timestamp}] (ID: ${msg.id}) ${author}${bot}${replyTo}${edited}: ${content}${tail}`;
